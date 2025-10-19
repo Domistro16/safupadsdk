@@ -47,13 +47,6 @@ tmp/
 tests/
 examples/
 
-# Config files
-tsconfig.json
-tsconfig.build.json
-rollup.config.js
-jest.config.js
-.eslintrc.json
-.prettierrc
 
 # Documentation
 *.md
