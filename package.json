@@ -1,6 +1,6 @@
 {
   "name": "@safupad/sdk",
-  "version": "1.0.0",
+  "version": "2.0.76",
   "description": "TypeScript SDK for interacting with SafuPad smart contracts",
   "main": "dist/index.js",
   "module": "dist/index.esm.js",
@@ -40,17 +40,14 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/safupad/sdk.git"
+    "url": "https://github.com/domistro16/safupadsdk.git"
   },
   "bugs": {
-    "url": "https://github.com/safupad/sdk/issues"
+    "url": "https://github.com/domistro16/safupadsdk/issues"
   },
-  "homepage": "https://github.com/safupad/sdk#readme",
+  "homepage": "https://github.com/domistro/safupadsdk#readme",
   "peerDependencies": {
-    "ethers": "^6.0.0"
-  },
-  "dependencies": {
-    "ethers": "^6.10.0"
+    "ethers": "^6.15.0"
   },
   "devDependencies": {
     "@rollup/plugin-commonjs": "^25.0.7",
@@ -69,11 +66,15 @@
     "rollup": "^4.9.6",
     "rollup-plugin-dts": "^6.1.0",
     "ts-jest": "^29.1.1",
+    "ts-node": "^10.9.2",
     "tslib": "^2.6.2",
     "typedoc": "^0.25.7",
     "typescript": "^5.3.3"
   },
   "engines": {
     "node": ">=16.0.0"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3"
   }
 }

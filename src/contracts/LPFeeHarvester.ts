@@ -10,14 +10,13 @@ import {
   EventFilterOptions,
 } from '../types';
 import { GAS_LIMITS } from '../constants';
-
-// src/contracts/LPFeeHarvester.ts (updated constructor)
 import { LPFeeHarvesterABI } from '../abis';
 
 export class LPFeeHarvester extends BaseContract {
   constructor(address: string, provider: ethers.Provider, signer?: ethers.Signer) {
     super(address, LPFeeHarvesterABI, provider, signer);
   }
+
   /**
    * Get LP lock information
    */
@@ -26,20 +25,21 @@ export class LPFeeHarvester extends BaseContract {
 
     const info = await this.contract.getLockInfo(tokenAddress);
 
+    // ✅ FIX: Access tuple by index
     return {
-      lpToken: info.lpToken,
-      creator: info.creator,
-      projectInfoFi: info.projectInfoFi,
-      lpAmount: info.lpAmount,
-      initialLPAmount: info.initialLPAmount,
-      lockTime: info.lockTime,
-      unlockTime: info.unlockTime,
-      active: info.active,
-      totalFeesHarvested: info.totalFeesHarvested,
-      harvestCount: info.harvestCount,
-      timeUntilUnlock: info.timeUntilUnlock,
-      estimatedValue: info.estimatedValue,
-      lastHarvestTime: info.lastHarvestTime,
+      lpToken: info[0],
+      creator: info[1],
+      projectInfoFi: info[2],
+      lpAmount: info[3],
+      initialLPAmount: info[4],
+      lockTime: info[5],
+      unlockTime: info[6],
+      active: info[7],
+      totalFeesHarvested: info[8],
+      harvestCount: info[9],
+      timeUntilUnlock: info[10],
+      estimatedValue: info[11],
+      lastHarvestTime: info[12],
     };
   }
 
@@ -51,12 +51,13 @@ export class LPFeeHarvester extends BaseContract {
 
     const history = await this.contract.getHarvestHistory(tokenAddress);
 
+    // ✅ FIX: Map array of tuples correctly
     return history.map((h: any) => ({
-      bnbAmount: h.bnbAmount,
-      token0Amount: h.token0Amount,
-      token1Amount: h.token1Amount,
-      timestamp: h.timestamp,
-      lpBurned: h.lpBurned,
+      bnbAmount: h[0],
+      token0Amount: h[1],
+      token1Amount: h[2],
+      timestamp: h[3],
+      lpBurned: h[4],
     }));
   }
 
@@ -66,11 +67,12 @@ export class LPFeeHarvester extends BaseContract {
   async getPlatformStats(): Promise<PlatformStats> {
     const stats = await this.contract.getPlatformStats();
 
+    // ✅ FIX: Access tuple by index
     return {
-      totalValueLocked: stats._totalValueLocked,
-      totalFeesDistributed: stats._totalFeesDistributed,
-      totalHarvests: stats._totalHarvests,
-      activeLocksCount: stats._activeLocksCount,
+      totalValueLocked: stats[0],
+      totalFeesDistributed: stats[1],
+      totalHarvests: stats[2],
+      activeLocksCount: stats[3],
     };
   }
 
@@ -82,9 +84,10 @@ export class LPFeeHarvester extends BaseContract {
 
     const result = await this.contract.canHarvest(tokenAddress);
 
+    // ✅ FIX: Access tuple by index
     return {
-      ready: result.ready,
-      timeRemaining: result.timeRemaining,
+      ready: result[0],
+      timeRemaining: result[1],
     };
   }
 
@@ -177,11 +180,12 @@ export class LPFeeHarvester extends BaseContract {
 
     const value = await this.contract.getLPValue(tokenAddress);
 
+    // ✅ FIX: Access tuple by index
     return {
-      token0Amount: value.token0Amount,
-      token1Amount: value.token1Amount,
-      token0: value.token0,
-      token1: value.token1,
+      token0Amount: value[0],
+      token1Amount: value[1],
+      token0: value[2],
+      token1: value[3],
     };
   }
 

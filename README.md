@@ -12,6 +12,7 @@ A comprehensive TypeScript SDK for interacting with SafuPad smart contracts on B
 - 📊 **Complete** - All contract functions wrapped with helpers
 - 🎨 **Event handling** - Easy event listening and filtering
 - 🛡️ **Error handling** - Comprehensive error types and messages
+- 📈 **Volume Tracking** - Built-in 24h volume and trading analytics
 
 ## Installation
 
@@ -59,13 +60,13 @@ const sdk = new SafuPadSDK({
 
 await sdk.initialize();
 
-// Create a launch
+// Create a launch - ✅ UPDATED: No projectInfoFiWallet needed
 const tx = await sdk.launchpad.createLaunch({
   name: 'MyToken',
   symbol: 'MTK',
   totalSupply: 1000000000,
-  raiseTargetUSD: '50000',
-  raiseMaxUSD: '100000',
+  raiseTargetBNB: '50', // ✅ NEW: BNB amounts instead of USD
+  raiseMaxBNB: '100', // ✅ NEW: BNB amounts instead of USD
   vestingDuration: 90,
   metadata: {
     logoURI: 'https://example.com/logo.png',
@@ -75,11 +76,73 @@ const tx = await sdk.launchpad.createLaunch({
     telegram: 'https://t.me/mytoken',
     discord: 'https://discord.gg/mytoken',
   },
-  projectInfoFiWallet: '0x...',
-  burnLP: false,
+  burnLP: false, // true to burn LP, false to lock in harvester
 });
 
 await tx.wait();
+```
+
+## 🚨 Breaking Changes v2.0.0
+
+### Removed `projectInfoFiWallet` Parameter
+
+**Before (v1.x):**
+
+```typescript
+await sdk.launchpad.createLaunch({
+  // ...
+  projectInfoFiWallet: '0x...', // ❌ No longer needed
+  // ...
+});
+```
+
+**After (v2.x):**
+
+```typescript
+await sdk.launchpad.createLaunch({
+  // ...
+  // projectInfoFiWallet removed - uses global InfoFi address
+  // ...
+});
+```
+
+### Changed to BNB-Based Raises
+
+**Before (v1.x):**
+
+```typescript
+await sdk.launchpad.createLaunch({
+  raiseTargetUSD: '50000', // ❌ USD amounts
+  raiseMaxUSD: '100000', // ❌ USD amounts
+  // ...
+});
+```
+
+**After (v2.x):**
+
+```typescript
+await sdk.launchpad.createLaunch({
+  raiseTargetBNB: '50', // ✅ BNB amounts (50-500 BNB)
+  raiseMaxBNB: '100', // ✅ BNB amounts
+  // ...
+});
+```
+
+### Updated Launch Info
+
+**Before (v1.x):**
+
+```typescript
+const info = await sdk.launchpad.getLaunchInfo(tokenAddress);
+console.log(info.projectInfoFiWallet); // ❌ No longer exists
+```
+
+**After (v2.x):**
+
+```typescript
+const info = await sdk.launchpad.getLaunchInfo(tokenAddress);
+// projectInfoFiWallet removed - managed globally by platform
+console.log(info.burnLP); // ✅ Still available
 ```
 
 ## Core Concepts
@@ -103,7 +166,7 @@ await sdk.initialize();
 The SDK exposes five main contract modules:
 
 - **`sdk.launchpad`** - LaunchpadManager interactions
-- **`sdk.bondingDex`** - BondingCurveDEX trading
+- **`sdk.bondingDex`** - BondingCurveDEX trading & volume analytics
 - **`sdk.tokenFactory`** - Token creation
 - **`sdk.priceOracle`** - Price feeds
 - **`sdk.lpHarvester`** - LP lock and fee harvesting
@@ -115,19 +178,33 @@ The SDK exposes five main contract modules:
 #### Create Project Raise
 
 ```typescript
+// ✅ UPDATED: No projectInfoFiWallet, uses BNB amounts
 const tx = await sdk.launchpad.createLaunch({
   name: 'MyToken',
   symbol: 'MTK',
   totalSupply: 1000000000, // 1 billion
-  raiseTargetUSD: '50000',
-  raiseMaxUSD: '100000',
-  vestingDuration: 90, // days
-  metadata: {...},
-  projectInfoFiWallet: '0x...',
-  burnLP: false, // or true to burn LP
-  vanitySalt: '0x...', // optional
+  raiseTargetBNB: '50', // ✅ Minimum 50 BNB
+  raiseMaxBNB: '100', // ✅ Maximum 500 BNB
+  vestingDuration: 90, // days (90-180)
+  metadata: {
+    logoURI: 'https://example.com/logo.png',
+    description: 'My awesome token',
+    website: 'https://mytoken.com',
+    twitter: '@mytoken',
+    telegram: '@mytoken',
+    discord: 'discord.gg/mytoken',
+  },
+  burnLP: false, // false = lock in harvester, true = burn permanently
+  vanitySalt: '0x...', // optional vanity address
 });
 ```
+
+**Parameters:**
+
+- `raiseTargetBNB`: String - Minimum raise target (50-500 BNB)
+- `raiseMaxBNB`: String - Maximum raise cap (50-500 BNB)
+- `burnLP`: Boolean - `true` burns LP permanently, `false` locks in fee harvester
+- ~~`projectInfoFiWallet`~~ - Removed, uses global InfoFi address
 
 #### Create Instant Launch
 
@@ -135,11 +212,11 @@ const tx = await sdk.launchpad.createLaunch({
 const tx = await sdk.launchpad.createInstantLaunch({
   name: 'MemeToken',
   symbol: 'MEME',
-  totalSupply: 1000000000, // must be 1 billion
+  totalSupply: 1000000000,       // must be 1 billion
   metadata: {...},
-  initialBuyBNB: '0.1',
-  burnLP: true,
-  vanitySalt: '0x...', // optional
+  initialBuyBNB: '0.1',          // Initial buy amount
+  burnLP: true,                   // Burn LP on graduation
+  vanitySalt: '0x...',           // optional
 });
 ```
 
@@ -155,12 +232,44 @@ const tx = await sdk.launchpad.contribute(
 #### Get Launch Info
 
 ```typescript
+// ✅ UPDATED: No longer includes projectInfoFiWallet
 const info = await sdk.launchpad.getLaunchInfo(tokenAddress);
 console.log('Founder:', info.founder);
 console.log('Raised:', sdk.formatBNB(info.totalRaised));
 console.log('Target:', sdk.formatBNB(info.raiseTarget));
 console.log('Completed:', info.raiseCompleted);
 console.log('Graduated:', info.graduatedToPancakeSwap);
+console.log('LP Burned:', info.burnLP);
+```
+
+**Returns:**
+
+```typescript
+{
+  founder: string;
+  raiseTarget: bigint;
+  raiseMax: bigint;
+  totalRaised: bigint;
+  raiseDeadline: bigint;
+  raiseCompleted: boolean;
+  graduatedToPancakeSwap: boolean;
+  raisedFundsVesting: bigint;
+  raisedFundsClaimed: bigint;
+  launchType: LaunchType;
+  burnLP: boolean;
+  // ❌ projectInfoFiWallet removed
+}
+```
+
+#### Get Launch Info with USD
+
+```typescript
+// ✅ Provides both BNB and USD values
+const info = await sdk.launchpad.getLaunchInfoWithUSD(tokenAddress);
+console.log('Target BNB:', sdk.formatBNB(info.raiseTargetBNB));
+console.log('Target USD:', sdk.formatBNB(info.raiseTargetUSD));
+console.log('Raised BNB:', sdk.formatBNB(info.totalRaisedBNB));
+console.log('Raised USD:', sdk.formatBNB(info.totalRaisedUSD));
 ```
 
 #### Claim Founder Rewards
@@ -182,9 +291,15 @@ if (amounts.claimableFunds > 0n) {
 }
 ```
 
+**Note:** If token price drops below starting market cap:
+
+- Tokens to be released are burned
+- Raised funds go to global InfoFi address for redistribution
+
 #### Graduate to PancakeSwap
 
 ```typescript
+// Token graduates at 15 BNB in bonding curve
 const tx = await sdk.launchpad.graduateToPancakeSwap(tokenAddress);
 await tx.wait();
 ```
@@ -226,13 +341,19 @@ const tx = await sdk.bondingDex.sellTokens(
 
 ```typescript
 const pool = await sdk.bondingDex.getPoolInfo(tokenAddress);
-console.log('Market Cap:', sdk.formatBNB(pool.marketCapUSD), 'USD');
+console.log('Market Cap USD:', sdk.formatBNB(pool.marketCapUSD));
+console.log('Market Cap BNB:', sdk.formatBNB(pool.marketCapBNB));
 console.log('BNB Reserve:', sdk.formatBNB(pool.bnbReserve));
 console.log('Token Reserve:', sdk.formatToken(pool.tokenReserve));
 console.log('Current Price:', sdk.formatBNB(pool.currentPrice));
 console.log('Graduation:', Number(pool.graduationProgress), '%');
 console.log('Graduated:', pool.graduated);
 ```
+
+**Graduation Threshold:**
+
+- All tokens graduate at **15 BNB** in bonding curve
+- Both PROJECT_RAISE and INSTANT_LAUNCH use same threshold
 
 #### Get Fee Information
 
@@ -241,6 +362,54 @@ const feeInfo = await sdk.bondingDex.getFeeInfo(tokenAddress);
 console.log('Current fee:', Number(feeInfo.currentFeeRate) / 100, '%');
 console.log('Fee stage:', feeInfo.feeStage);
 console.log('Blocks until next tier:', feeInfo.blocksUntilNextTier);
+```
+
+**Fee Schedule:**
+
+- **Blocks 0-20**: 10% (anti-bot)
+- **Blocks 21-50**: 6%
+- **Blocks 51-100**: 4%
+- **After block 100**: 1% (PROJECT_RAISE) or 2% (INSTANT_LAUNCH)
+- **Post-graduation**: 2%
+
+#### Volume Analytics
+
+```typescript
+// Get 24h trading volume
+const volume24h = await sdk.bondingDex.get24hVolume(tokenAddress);
+console.log('24h Volume:', sdk.formatBNB(volume24h.totalVolumeBNB), 'BNB');
+console.log('Buy Volume:', sdk.formatBNB(volume24h.totalBuyVolumeBNB));
+console.log('Sell Volume:', sdk.formatBNB(volume24h.totalSellVolumeBNB));
+console.log('Total Trades:', volume24h.buyCount + volume24h.sellCount);
+console.log('Unique Traders:', volume24h.uniqueTraders);
+console.log(
+  'Buy/Sell Ratio:',
+  Number(volume24h.totalBuyVolumeBNB) / Number(volume24h.totalSellVolumeBNB)
+);
+
+// Get total all-time volume
+const totalVolume = await sdk.bondingDex.getTotalVolume(tokenAddress);
+
+// Get hourly volume for last 24 hours
+const hourlyVolume = await sdk.bondingDex.getVolumeHistory(
+  tokenAddress,
+  3600, // 1 hour intervals
+  24 // 24 periods
+);
+
+// Get recent trades
+const trades = await sdk.bondingDex.getRecentTrades(tokenAddress, 50);
+trades.forEach((trade) => {
+  console.log(`${trade.type}: ${sdk.formatBNB(trade.bnbAmount)} BNB`);
+});
+
+// Get top traders
+const topTraders = await sdk.bondingDex.getTopTraders(tokenAddress, 10);
+topTraders.forEach((trader, i) => {
+  console.log(`#${i + 1}: ${trader.address}`);
+  console.log(`  Volume: ${sdk.formatBNB(trader.totalVolumeBNB)} BNB`);
+  console.log(`  Net Position: ${sdk.formatToken(trader.netTokens)}`);
+});
 ```
 
 #### Claim Creator Fees
@@ -271,14 +440,33 @@ const price = await sdk.priceOracle.getBNBPrice();
 console.log('BNB Price:', sdk.formatUnits(price, 8), 'USD');
 
 // Convert USD to BNB
-const bnbAmount = await sdk.priceOracle.usdToBNB(
-  ethers.parseUnits('50000', 18)
-);
+const bnbAmount = await sdk.priceOracle.usdToBNB(ethers.parseUnits('50000', 18));
 
 // Convert BNB to USD
-const usdAmount = await sdk.priceOracle.bnbToUSD(
-  ethers.parseEther('10')
-);
+const usdAmount = await sdk.priceOracle.bnbToUSD(ethers.parseEther('10'));
+```
+
+### LP Fee Harvester
+
+```typescript
+// Get lock information
+const lockInfo = await sdk.lpHarvester.getLockInfo(tokenAddress);
+console.log('LP Amount:', sdk.formatToken(lockInfo.lpAmount));
+console.log('Unlock Time:', new Date(Number(lockInfo.unlockTime) * 1000));
+console.log('Fees Harvested:', sdk.formatBNB(lockInfo.totalFeesHarvested));
+
+// Check if can harvest
+const [canHarvest, timeRemaining] = await sdk.lpHarvester.canHarvest(tokenAddress);
+
+if (canHarvest) {
+  const tx = await sdk.lpHarvester.harvestFees(tokenAddress);
+  await tx.wait();
+}
+
+// Get platform stats
+const stats = await sdk.lpHarvester.getPlatformStats();
+console.log('Total Value Locked:', sdk.formatBNB(stats.totalValueLocked));
+console.log('Total Fees Distributed:', sdk.formatBNB(stats.totalFeesDistributed));
 ```
 
 ### Utility Functions
@@ -312,23 +500,34 @@ const txUrl = sdk.getExplorerUrl('tx', '0x...');
 // Launch events
 const unsubscribe1 = sdk.launchpad.onLaunchCreated((event) => {
   console.log('New launch:', event.args.token);
+  console.log('Founder:', event.args.founder);
+  console.log('Burn LP:', event.args.burnLP);
 });
 
 // Trading events
 const unsubscribe2 = sdk.bondingDex.onTokensBought((event) => {
   console.log('Buyer:', event.args.buyer);
   console.log('Amount:', sdk.formatBNB(event.args.bnbAmount));
+  console.log('Price:', sdk.formatBNB(event.args.currentPrice));
+});
+
+// Sell events
+const unsubscribe3 = sdk.bondingDex.onTokensSold((event) => {
+  console.log('Seller:', event.args.seller);
+  console.log('Amount:', sdk.formatBNB(event.args.bnbReceived));
 });
 
 // Graduation events
-const unsubscribe3 = sdk.bondingDex.onPoolGraduated((event) => {
+const unsubscribe4 = sdk.bondingDex.onPoolGraduated((event) => {
   console.log('Pool graduated:', event.args.token);
+  console.log('Final Market Cap:', sdk.formatBNB(event.args.finalMarketCap));
 });
 
 // Cleanup
 unsubscribe1();
 unsubscribe2();
 unsubscribe3();
+unsubscribe4();
 ```
 
 ### Query Past Events
@@ -441,7 +640,7 @@ function useSafuPad() {
         network: 'bsc',
         provider: window.ethereum,
       });
-      
+
       await newSdk.initialize();
       setSdk(newSdk);
     };
@@ -462,13 +661,21 @@ function useSafuPad() {
 
 function App() {
   const { sdk, address, connect } = useSafuPad();
+  const [volume, setVolume] = useState(null);
 
   const handleBuy = async () => {
     if (!sdk) return;
-    
+
     const tx = await sdk.bondingDex.buyTokens('0x...', '0.1');
     await tx.wait();
     alert('Purchase successful!');
+  };
+
+  const fetchVolume = async () => {
+    if (!sdk) return;
+
+    const vol24h = await sdk.bondingDex.get24hVolume('0x...');
+    setVolume(vol24h);
   };
 
   return (
@@ -479,6 +686,13 @@ function App() {
         <div>
           <p>Connected: {address}</p>
           <button onClick={handleBuy}>Buy Tokens</button>
+          <button onClick={fetchVolume}>Get 24h Volume</button>
+          {volume && (
+            <div>
+              <p>Total Volume: {sdk.formatBNB(volume.totalVolumeBNB)} BNB</p>
+              <p>Trades: {volume.buyCount + volume.sellCount}</p>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -519,6 +733,51 @@ npm test
 npm run docs
 ```
 
+## Migration Guide (v1.x → v2.x)
+
+### 1. Update Launch Creation
+
+```typescript
+// ❌ Old (v1.x)
+await sdk.launchpad.createLaunch({
+  raiseTargetUSD: '50000',
+  raiseMaxUSD: '100000',
+  projectInfoFiWallet: '0x...',
+  // ...
+});
+
+// ✅ New (v2.x)
+await sdk.launchpad.createLaunch({
+  raiseTargetBNB: '50', // Now in BNB
+  raiseMaxBNB: '100', // Now in BNB
+  // projectInfoFiWallet removed
+  // ...
+});
+```
+
+### 2. Update Launch Info Access
+
+```typescript
+// ❌ Old (v1.x)
+const info = await sdk.launchpad.getLaunchInfo(token);
+console.log(info.projectInfoFiWallet); // No longer exists
+
+// ✅ New (v2.x)
+const info = await sdk.launchpad.getLaunchInfo(token);
+// Access other properties as before
+console.log(info.burnLP); // Still available
+```
+
+### 3. Update Raise Validation
+
+```typescript
+// ❌ Old (v1.x)
+if (raiseTarget >= 50000 && raiseTarget <= 500000) // USD
+
+// ✅ New (v2.x)
+if (raiseTarget >= 50 && raiseTarget <= 500) // BNB
+```
+
 ## Contributing
 
 Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details.
@@ -536,7 +795,18 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ## Changelog
 
+### v2.0.0 (Breaking Changes)
+
+- ✅ **Removed `projectInfoFiWallet` parameter** - Now uses global InfoFi address
+- ✅ **Changed to BNB-based raises** - `raiseTargetBNB` and `raiseMaxBNB` instead of USD
+- ✅ **Unified graduation threshold** - All tokens graduate at 15 BNB
+- ✅ **Added volume tracking** - 24h volume, top traders, and trading analytics
+- ✅ **Fixed event parsing** - Improved reliability of volume tracking
+- 🔧 Updated ABIs for new contract versions
+- 🔧 Improved TypeScript types
+
 ### v1.0.0
+
 - Initial release
 - Full support for all SafuPad contracts
 - TypeScript support

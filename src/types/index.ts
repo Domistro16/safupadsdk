@@ -63,16 +63,16 @@ export interface TokenMetadata {
 
 /**
  * Launch creation parameters
+ * ✅ UPDATED: Removed projectInfoFiWallet, changed to BNB amounts
  */
 export interface CreateLaunchParams {
   name: string;
   symbol: string;
   totalSupply: number;
-  raiseTargetUSD: string;
-  raiseMaxUSD: string;
+  raiseTargetBNB: string; // ✅ Changed from raiseTargetUSD to raiseTargetBNB
+  raiseMaxBNB: string; // ✅ Changed from raiseMaxUSD to raiseMaxBNB
   vestingDuration: number; // in days
   metadata: TokenMetadata;
-  projectInfoFiWallet: string;
   burnLP: boolean;
   vanitySalt?: string;
 }
@@ -92,6 +92,7 @@ export interface CreateInstantLaunchParams {
 
 /**
  * Launch information
+ * ✅ UPDATED: Removed projectInfoFiWallet
  */
 export interface LaunchInfo {
   founder: string;
@@ -104,12 +105,12 @@ export interface LaunchInfo {
   raisedFundsVesting: bigint;
   raisedFundsClaimed: bigint;
   launchType: LaunchType;
-  projectInfoFiWallet: string;
   burnLP: boolean;
 }
 
 /**
  * Launch information with USD values
+ * ✅ UPDATED: Removed projectInfoFiWallet
  */
 export interface LaunchInfoWithUSD {
   founder: string;
@@ -182,11 +183,12 @@ export interface CreatorFeeInfo {
 
 /**
  * LP lock information
+ * Note: projectInfoFi is still used in LPFeeHarvester contract
  */
 export interface LPLockInfo {
   lpToken: string;
   creator: string;
-  projectInfoFi: string;
+  projectInfoFi: string; // This is the global InfoFi address
   lpAmount: bigint;
   initialLPAmount: bigint;
   lockTime: bigint;

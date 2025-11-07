@@ -1,6 +1,5 @@
 // src/constants/index.ts
 import { NetworkConfig, SDKConfig } from '../types';
-
 /**
  * Network configurations
  */
@@ -29,7 +28,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
   bscTestnet: {
     name: 'BSC Testnet',
     chainId: 97,
-    rpcUrl: 'https://data-seed-prebsc-1-s1.binance.org:8545',
+    rpcUrl: 'https://data-seed-prebsc-1-s1.binance.org:8545/',
     explorerUrl: 'https://testnet.bscscan.com',
     nativeCurrency: {
       name: 'BNB',
@@ -37,11 +36,11 @@ export const NETWORKS: Record<string, NetworkConfig> = {
       decimals: 18,
     },
     contracts: {
-      launchpadManager: '0x79a7bec1aF5616E1813a53aEabA61c99794Fb09B', // UPDATE AFTER DEPLOYMENT
-      bondingCurveDEX: '0xc72c7345dCa2F961652b1Ad7D3DBe2cEddE0E2Aa',
-      tokenFactory: '0xadB4F18F764D8F2DEe6032Fb74262cA1Ca62f94C',
-      priceOracle: '0x4D4B1596C94Ae01B4570e3d3Ca3d8cBe9D38c297',
-      lpFeeHarvester: '0xee8Aa131bE6d3575ccd0132Fdca1Dd2Ccadb9080',
+      launchpadManager: '0x4c797EbaA64Cc7f1bD2a82A36bEE5Cf335D1830c', // UPDATE AFTER DEPLOYMENT
+      bondingCurveDEX: '0x14eB3B6C297ff6fefc25c0E0d289Bf8348e864f6',
+      tokenFactory: '0xcb7526b9598240A737237C52f852705e6A449cD0',
+      priceOracle: '0x56f0b1f80F8cc37f875Be42e2f4D09810514F346',
+      lpFeeHarvester: '0xa886B8897814193f99A88701d70b31b4a8E27a1E',
       pancakeRouter: '0xD99D1c33F9fC3444f8101754aBC46c52416550D1',
       pancakeFactory: '0x6725F303b657a9451d8BA641348b6761A6CC7a17',
     },
@@ -86,40 +85,40 @@ export const CONSTANTS = {
   MAX_RAISE_USD: '500000',
   MAX_LIQUIDITY_USD: '100000',
   RAISE_DURATION: 24 * 60 * 60, // 24 hours in seconds
-  
+
   // Token allocation
   FOUNDER_ALLOCATION: 20, // 20%
   IMMEDIATE_FOUNDER_RELEASE: 50, // 50%
   LIQUIDITY_PERCENT: 10, // 10%
   LIQUIDITY_BNB_PERCENT: 50, // 50%
-  
+
   // Vesting
   MIN_VESTING_DURATION: 90 * 24 * 60 * 60, // 90 days
   MAX_VESTING_DURATION: 180 * 24 * 60 * 60, // 180 days
   VESTING_RELEASE_INTERVAL: 30 * 24 * 60 * 60, // 30 days
-  
+
   // Fees
   INITIAL_FEE_BPS: 1000, // 10%
   OPTION1_FINAL_FEE_BPS: 100, // 1%
   OPTION2_FINAL_FEE_BPS: 200, // 2%
   POST_GRADUATION_FEE_BPS: 200, // 2%
   BASIS_POINTS: 10000,
-  
+
   // Fee decay thresholds (blocks)
   FEE_DECAY_BLOCK_1: 20,
   FEE_DECAY_BLOCK_2: 50,
   FEE_DECAY_BLOCK_3: 100,
-  
+
   // Fee tiers
   FEE_TIER_1: 1000, // 10%
   FEE_TIER_2: 600, // 6%
   FEE_TIER_3: 400, // 4%
-  
+
   // Graduation thresholds
   GRADUATION_MARKET_CAP_USD: '500000',
   TARGET_GRADUATION_MARKET_CAP_USD: '90000',
   TARGET_PRICE_MULTIPLIER: 6,
-  
+
   // LP Harvester
   CLAIM_COOLDOWN: 24 * 60 * 60, // 24 hours
   HARVEST_COOLDOWN: 24 * 60 * 60, // 24 hours
@@ -127,12 +126,12 @@ export const CONSTANTS = {
   DEFAULT_LOCK_DURATION: 365 * 24 * 60 * 60, // 365 days
   MIN_LOCK_DURATION: 90 * 24 * 60 * 60, // 90 days
   MAX_LOCK_DURATION: 1460 * 24 * 60 * 60, // 4 years
-  
+
   // Fee distribution (percentage)
   CREATOR_FEE_BPS: 7000, // 70%
   PROJECT_INFOFI_BPS: 2000, // 20%
   PLATFORM_FEE_BPS: 1000, // 10%
-  
+
   // Token supply
   TOTAL_TOKEN_SUPPLY: '1000000000', // 1 billion
 };
@@ -171,7 +170,7 @@ export const EVENTS = {
   LP_BURNED: 'LPBurned',
   LP_LOCKED: 'LPLocked',
   TRANSFERS_ENABLED: 'TransfersEnabled',
-  
+
   // BondingCurveDEX events
   POOL_CREATED: 'PoolCreated',
   TOKENS_BOUGHT: 'TokensBought',
@@ -181,7 +180,7 @@ export const EVENTS = {
   CREATOR_FEES_CLAIMED: 'CreatorFeesClaimed',
   POST_GRADUATION_SELL: 'PostGraduationSell',
   LP_TOKENS_HANDLED: 'LPTokensHandled',
-  
+
   // LPFeeHarvester events
   FEES_HARVESTED: 'FeesHarvested',
   FEES_DISTRIBUTED: 'FeesDistributed',
@@ -243,12 +242,20 @@ export const BLOCK_TIME = {
 export const GAS_LIMITS = {
   CREATE_LAUNCH: 5000000n,
   CREATE_INSTANT_LAUNCH: 5000000n,
-  CONTRIBUTE: 200000n,
-  BUY_TOKENS: 300000n,
-  SELL_TOKENS: 300000n,
+  CONTRIBUTE: 500000n,
+  BUY_TOKENS: 500000n,
+  SELL_TOKENS: 500000n,
   CLAIM_FOUNDER_TOKENS: 150000n,
   CLAIM_RAISED_FUNDS: 150000n,
-  GRADUATE_TO_PANCAKESWAP: 1000000n,
+  GRADUATE_TO_PANCAKESWAP: 5000000n,
   HARVEST_FEES: 500000n,
   UNLOCK_LP: 200000n,
+  CLAIM_CONTRIBUTOR_TOKENS: 150000n, // Claim tokens after successful raise
+  CLAIM_REFUND: 100000n, // Claim refund after failed raise
+  BURN_FAILED_RAISE_TOKENS: 100000n, // Burn tokens from failed raise
+
+  // New admin functions
+  UPDATE_FALLBACK_PRICE: 50000n, // Update oracle fallback price
+  UPDATE_LP_FEE_HARVESTER: 50000n, // Update LP harvester address
+  EMERGENCY_WITHDRAW: 100000n,
 };

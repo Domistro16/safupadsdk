@@ -13,18 +13,51 @@ import {
   EventFilterOptions,
 } from '../types';
 import { CONSTANTS, GAS_LIMITS } from '../constants';
+import { LaunchpadManagerABI } from '../abis';
+
+/**
+ * Launch vesting information
+ */
+export interface LaunchVesting {
+  startMarketCap: bigint;
+  vestingDuration: bigint;
+  vestingStartTime: bigint;
+  founderTokens: bigint;
+  founderTokensClaimed: bigint;
+}
 
 /**
  * LaunchpadManager contract wrapper
+ *
+ * Supports two launch types:
+ * 1. PROJECT_RAISE: Contribution-based fundraising (24-hour raise period)
+ *    - Users contribute BNB during raise period
+ *    - Tokens distributed proportionally after raise completes
+ *    - Does NOT use BondingCurveDEX
+ *    - Graduates directly to PancakeSwap after successful raise
+ *
+ * 2. INSTANT_LAUNCH: Bonding curve trading (via BondingCurveDEX)
+ *    - Creates pool in BondingCurveDEX for immediate trading
+ *    - Uses bonding curve AMM formula
+ *    - Graduates to PancakeSwap at 0.6 BNB threshold
+ *
+ * ✅ UPDATED: Removed projectInfoFiWallet - uses global InfoFi address
  */
-import { LaunchpadManagerABI } from '../abis';
-
 export class LaunchpadManager extends BaseContract {
   constructor(address: string, provider: ethers.Provider, signer?: ethers.Signer) {
     super(address, LaunchpadManagerABI, provider, signer);
   }
+
   /**
    * Create a new PROJECT_RAISE launch
+   *
+   * PROJECT_RAISE launches:
+   * - 24-hour contribution period
+   * - Tokens distributed after raise completes
+   * - Does NOT use BondingCurveDEX
+   * - 10% reserved for PancakeSwap
+   *
+   * ✅ UPDATED: No longer requires projectInfoFiWallet parameter
    */
   async createLaunch(params: CreateLaunchParams, options?: TxOptions): Promise<TxResult> {
     this.requireSigner();
@@ -32,9 +65,9 @@ export class LaunchpadManager extends BaseContract {
     // Validate params
     this.validateLaunchParams(params);
 
-    // Convert USD amounts to proper format
-    const raiseTargetUSD = ethers.parseUnits(params.raiseTargetUSD, 18);
-    const raiseMaxUSD = ethers.parseUnits(params.raiseMaxUSD, 18);
+    // ✅ UPDATED: Now uses BNB values instead of USD
+    const raiseTargetBNB = ethers.parseEther(params.raiseTargetBNB);
+    const raiseMaxBNB = ethers.parseEther(params.raiseMaxBNB);
     const vestingDuration = params.vestingDuration * 24 * 60 * 60; // days to seconds
 
     // Prepare metadata
@@ -55,12 +88,11 @@ export class LaunchpadManager extends BaseContract {
         params.name,
         params.symbol,
         params.totalSupply,
-        raiseTargetUSD,
-        raiseMaxUSD,
+        raiseTargetBNB,
+        raiseMaxBNB,
         vestingDuration,
         metadata,
         params.vanitySalt,
-        params.projectInfoFiWallet,
         params.burnLP,
         this.buildTxOptions(options, GAS_LIMITS.CREATE_LAUNCH)
       );
@@ -69,11 +101,10 @@ export class LaunchpadManager extends BaseContract {
         params.name,
         params.symbol,
         params.totalSupply,
-        raiseTargetUSD,
-        raiseMaxUSD,
+        raiseTargetBNB,
+        raiseMaxBNB,
         vestingDuration,
         metadata,
-        params.projectInfoFiWallet,
         params.burnLP,
         this.buildTxOptions(options, GAS_LIMITS.CREATE_LAUNCH)
       );
@@ -87,6 +118,13 @@ export class LaunchpadManager extends BaseContract {
 
   /**
    * Create a new INSTANT_LAUNCH
+   *
+   * INSTANT_LAUNCH:
+   * - Creates pool in BondingCurveDEX immediately
+   * - Bonding curve trading with dynamic fees (10% → 2%)
+   * - 80% on curve, 20% reserved for PancakeSwap
+   * - Graduates at 0.6 BNB threshold
+   * - Virtual reserves for 6x price multiplier
    */
   async createInstantLaunch(
     params: CreateInstantLaunchParams,
@@ -150,6 +188,9 @@ export class LaunchpadManager extends BaseContract {
 
   /**
    * Contribute to a PROJECT_RAISE launch
+   *
+   * Note: Only works for PROJECT_RAISE tokens (not INSTANT_LAUNCH)
+   * INSTANT_LAUNCH tokens trade on bonding curve instead
    */
   async contribute(
     tokenAddress: string,
@@ -173,6 +214,8 @@ export class LaunchpadManager extends BaseContract {
 
   /**
    * Claim founder tokens (vested tokens)
+   *
+   * Works for both PROJECT_RAISE and INSTANT_LAUNCH
    */
   async claimFounderTokens(tokenAddress: string, options?: TxOptions): Promise<TxResult> {
     this.requireSigner();
@@ -191,6 +234,9 @@ export class LaunchpadManager extends BaseContract {
 
   /**
    * Claim raised funds (vested BNB from raise)
+   *
+   * Note: Only for PROJECT_RAISE tokens
+   * INSTANT_LAUNCH tokens don't have raised funds to claim
    */
   async claimRaisedFunds(tokenAddress: string, options?: TxOptions): Promise<TxResult> {
     this.requireSigner();
@@ -209,6 +255,14 @@ export class LaunchpadManager extends BaseContract {
 
   /**
    * Graduate pool to PancakeSwap
+   *
+   * For PROJECT_RAISE:
+   * - Adds liquidity to PancakeSwap with raised BNB
+   * - Uses 10% of tokens reserved for PancakeSwap
+   *
+   * For INSTANT_LAUNCH:
+   * - Withdraws graduated pool from BondingCurveDEX
+   * - Adds liquidity with 0.6 BNB + 20% of tokens
    */
   async graduateToPancakeSwap(tokenAddress: string, options?: TxOptions): Promise<TxResult> {
     this.requireSigner();
@@ -226,7 +280,51 @@ export class LaunchpadManager extends BaseContract {
   }
 
   /**
+   * Handle post-graduation selling for PROJECT_RAISE tokens
+   *
+   * Allows users to sell their tokens after a PROJECT_RAISE has graduated to PancakeSwap.
+   * The function:
+   * - Takes 2% fee on tokens
+   * - Swaps half the tokens for BNB
+   * - Adds the other half + BNB back to liquidity pool
+   * - Burns the LP tokens
+   * - Pays seller 70% of the BNB from swap
+   * - Remaining 30% goes back to liquidity
+   *
+   * Note: Only works for PROJECT_RAISE tokens that have graduated
+   *
+   * @param tokenAddress Address of the PROJECT_RAISE token
+   * @param tokenAmount Amount of tokens to sell (in wei)
+   * @param minBNBOut Minimum BNB to receive (slippage protection)
+   */
+  async handlePostGraduationSell(
+    tokenAddress: string,
+    tokenAmount: string,
+    minBNBOut: string,
+    options?: TxOptions
+  ): Promise<TxResult> {
+    this.requireSigner();
+    this.validateAddress(tokenAddress);
+
+    const amount = ethers.parseEther(tokenAmount);
+    const minOut = ethers.parseEther(minBNBOut);
+
+    const tx = await this.contract.handlePostGraduationSell(
+      tokenAddress,
+      amount,
+      minOut,
+      this.buildTxOptions(options, GAS_LIMITS.CONTRIBUTE) // Similar gas to contribute
+    );
+
+    return {
+      hash: tx.hash,
+      wait: () => tx.wait(),
+    };
+  }
+
+  /**
    * Get launch information
+   * ✅ UPDATED: No longer returns projectInfoFiWallet
    */
   async getLaunchInfo(tokenAddress: string): Promise<LaunchInfo> {
     this.validateAddress(tokenAddress);
@@ -234,23 +332,23 @@ export class LaunchpadManager extends BaseContract {
     const info = await this.contract.getLaunchInfo(tokenAddress);
 
     return {
-      founder: info.founder,
-      raiseTarget: info.raiseTarget,
-      raiseMax: info.raiseMax,
-      totalRaised: info.totalRaised,
-      raiseDeadline: info.raiseDeadline,
-      raiseCompleted: info.raiseCompleted,
-      graduatedToPancakeSwap: info.graduatedToPancakeSwap,
-      raisedFundsVesting: info.raisedFundsVesting,
-      raisedFundsClaimed: info.raisedFundsClaimed,
-      launchType: info.launchType,
-      projectInfoFiWallet: info.projectInfoFiWallet,
-      burnLP: info.burnLP,
+      founder: info[0],
+      raiseTarget: info[1],
+      raiseMax: info[2],
+      totalRaised: info[3],
+      raiseDeadline: info[4],
+      raiseCompleted: info[5],
+      graduatedToPancakeSwap: info[6],
+      raisedFundsVesting: info[7],
+      raisedFundsClaimed: info[8],
+      launchType: info[9], // 0 = PROJECT_RAISE, 1 = INSTANT_LAUNCH
+      burnLP: info[10],
     };
   }
 
   /**
    * Get launch information with USD values
+   * ✅ UPDATED: No longer returns projectInfoFiWallet
    */
   async getLaunchInfoWithUSD(tokenAddress: string): Promise<LaunchInfoWithUSD> {
     this.validateAddress(tokenAddress);
@@ -258,17 +356,17 @@ export class LaunchpadManager extends BaseContract {
     const info = await this.contract.getLaunchInfoWithUSD(tokenAddress);
 
     return {
-      founder: info.founder,
-      raiseTargetBNB: info.raiseTargetBNB,
-      raiseTargetUSD: info.raiseTargetUSD,
-      raiseMaxBNB: info.raiseMaxBNB,
-      raiseMaxUSD: info.raiseMaxUSD,
-      totalRaisedBNB: info.totalRaisedBNB,
-      totalRaisedUSD: info.totalRaisedUSD,
-      raiseDeadline: info.raiseDeadline,
-      raiseCompleted: info.raiseCompleted,
-      launchType: info.launchType,
-      burnLP: info.burnLP,
+      founder: info[0],
+      raiseTargetBNB: info[1],
+      raiseTargetUSD: info[2],
+      raiseMaxBNB: info[3],
+      raiseMaxUSD: info[4],
+      totalRaisedBNB: info[5],
+      totalRaisedUSD: info[6],
+      raiseDeadline: info[7],
+      raiseCompleted: info[8],
+      launchType: info[9], // 0 = PROJECT_RAISE, 1 = INSTANT_LAUNCH
+      burnLP: info[10],
     };
   }
 
@@ -281,13 +379,91 @@ export class LaunchpadManager extends BaseContract {
     const amounts = await this.contract.getClaimableAmounts(tokenAddress);
 
     return {
-      claimableTokens: amounts.claimableTokens,
-      claimableFunds: amounts.claimableFunds,
+      claimableTokens: amounts[0],
+      claimableFunds: amounts[1],
     };
   }
 
   /**
+   * Get launch vesting information
+   * Returns details about the vesting schedule for founder tokens
+   */
+  async getLaunchVesting(tokenAddress: string): Promise<LaunchVesting> {
+    this.validateAddress(tokenAddress);
+
+    const vesting = await this.contract.launchVesting(tokenAddress);
+
+    return {
+      startMarketCap: vesting.startMarketCap,
+      vestingDuration: vesting.vestingDuration,
+      vestingStartTime: vesting.vestingStartTime,
+      founderTokens: vesting.founderTokens,
+      founderTokensClaimed: vesting.founderTokensClaimed,
+    };
+  }
+
+  /**
+   * Get vesting progress percentage (0-100)
+   */
+  async getVestingProgress(tokenAddress: string): Promise<number> {
+    const vesting = await this.getLaunchVesting(tokenAddress);
+
+    if (vesting.founderTokens === 0n) {
+      return 0;
+    }
+
+    const progress = Number((vesting.founderTokensClaimed * 10000n) / vesting.founderTokens) / 100;
+    return Math.min(progress, 100);
+  }
+
+  /**
+   * Get time-based vesting progress (0-100)
+   * Based on how much time has passed in the vesting period
+   */
+  async getTimeBasedVestingProgress(tokenAddress: string): Promise<number> {
+    const vesting = await this.getLaunchVesting(tokenAddress);
+
+    if (vesting.vestingDuration === 0n) {
+      return 100;
+    }
+
+    const currentTime = BigInt(Math.floor(Date.now() / 1000));
+    const vestingStartTime = vesting.vestingStartTime;
+    const vestingEndTime = vestingStartTime + vesting.vestingDuration;
+
+    if (currentTime >= vestingEndTime) {
+      return 100;
+    }
+
+    if (currentTime <= vestingStartTime) {
+      return 0;
+    }
+
+    const elapsed = currentTime - vestingStartTime;
+    const progress = Number((elapsed * 10000n) / vesting.vestingDuration) / 100;
+    return Math.min(progress, 100);
+  }
+
+  /**
+   * Get remaining vesting time in seconds
+   */
+  async getRemainingVestingTime(tokenAddress: string): Promise<number> {
+    const vesting = await this.getLaunchVesting(tokenAddress);
+
+    const currentTime = BigInt(Math.floor(Date.now() / 1000));
+    const vestingEndTime = vesting.vestingStartTime + vesting.vestingDuration;
+
+    if (currentTime >= vestingEndTime) {
+      return 0;
+    }
+
+    return Number(vestingEndTime - currentTime);
+  }
+
+  /**
    * Get contribution info for an address
+   *
+   * Note: Only relevant for PROJECT_RAISE tokens
    */
   async getContribution(tokenAddress: string, contributor: string): Promise<ContributionInfo> {
     this.validateAddress(tokenAddress);
@@ -296,13 +472,13 @@ export class LaunchpadManager extends BaseContract {
     const info = await this.contract.getContribution(tokenAddress, contributor);
 
     return {
-      amount: info.amount,
-      claimed: info.claimed,
+      amount: info[0],
+      claimed: info[1],
     };
   }
 
   /**
-   * Get all launches
+   * Get all launches (both PROJECT_RAISE and INSTANT_LAUNCH)
    */
   async getAllLaunches(): Promise<string[]> {
     return await this.contract.getAllLaunches();
@@ -322,6 +498,9 @@ export class LaunchpadManager extends BaseContract {
 
   /**
    * Get launch progress percentage
+   *
+   * Note: Only meaningful for PROJECT_RAISE tokens
+   * For INSTANT_LAUNCH, check BondingCurveDEX graduation progress instead
    */
   async getLaunchProgress(tokenAddress: string): Promise<number> {
     const info = await this.getLaunchInfo(tokenAddress);
@@ -336,6 +515,9 @@ export class LaunchpadManager extends BaseContract {
 
   /**
    * Check if launch deadline has passed
+   *
+   * Note: Only relevant for PROJECT_RAISE tokens (24-hour deadline)
+   * INSTANT_LAUNCH tokens have no deadline
    */
   async hasLaunchDeadlinePassed(tokenAddress: string): Promise<boolean> {
     const info = await this.getLaunchInfo(tokenAddress);
@@ -345,6 +527,9 @@ export class LaunchpadManager extends BaseContract {
 
   /**
    * Get time remaining until deadline
+   *
+   * Note: Only relevant for PROJECT_RAISE tokens
+   * Returns 0 for INSTANT_LAUNCH tokens
    */
   async getTimeUntilDeadline(tokenAddress: string): Promise<number> {
     const info = await this.getLaunchInfo(tokenAddress);
@@ -354,35 +539,35 @@ export class LaunchpadManager extends BaseContract {
   }
 
   /**
-   * Listen to LaunchCreated events
+   * Listen to LaunchCreated events (PROJECT_RAISE)
    */
   onLaunchCreated(callback: (event: any) => void, filter?: EventFilterOptions): () => void {
     return this.addEventListener('LaunchCreated', callback, filter);
   }
 
   /**
-   * Listen to InstantLaunchCreated events
+   * Listen to InstantLaunchCreated events (INSTANT_LAUNCH)
    */
   onInstantLaunchCreated(callback: (event: any) => void, filter?: EventFilterOptions): () => void {
     return this.addEventListener('InstantLaunchCreated', callback, filter);
   }
 
   /**
-   * Listen to ContributionMade events
+   * Listen to ContributionMade events (PROJECT_RAISE only)
    */
   onContributionMade(callback: (event: any) => void, filter?: EventFilterOptions): () => void {
     return this.addEventListener('ContributionMade', callback, filter);
   }
 
   /**
-   * Listen to RaiseCompleted events
+   * Listen to RaiseCompleted events (PROJECT_RAISE only)
    */
   onRaiseCompleted(callback: (event: any) => void, filter?: EventFilterOptions): () => void {
     return this.addEventListener('RaiseCompleted', callback, filter);
   }
 
   /**
-   * Listen to GraduatedToPancakeSwap events
+   * Listen to GraduatedToPancakeSwap events (both launch types)
    */
   onGraduatedToPancakeSwap(
     callback: (event: any) => void,
@@ -392,31 +577,283 @@ export class LaunchpadManager extends BaseContract {
   }
 
   /**
+   * ✅ NEW: Claim contributor tokens after successful PROJECT_RAISE
+   *
+   * After a successful PROJECT_RAISE, contributors can claim their proportional
+   * share of tokens from the 70% contributor allocation.
+   *
+   * Note: Only works for PROJECT_RAISE tokens after successful raise
+   *
+   * @param tokenAddress - Address of the launched token
+   * @param options - Transaction options
+   */
+  async claimContributorTokens(tokenAddress: string, options?: TxOptions): Promise<TxResult> {
+    this.requireSigner();
+    this.validateAddress(tokenAddress);
+
+    const tx = await this.contract.claimContributorTokens(
+      tokenAddress,
+      this.buildTxOptions(options, GAS_LIMITS.CLAIM_CONTRIBUTOR_TOKENS)
+    );
+
+    return {
+      hash: tx.hash,
+      wait: () => tx.wait(),
+    };
+  }
+
+  /**
+   * ✅ NEW: Claim refund after failed PROJECT_RAISE
+   *
+   * If a PROJECT_RAISE fails to meet its target after the 24-hour deadline,
+   * contributors can claim their BNB refunds.
+   *
+   * Note: Only works for PROJECT_RAISE tokens that failed to meet target
+   *
+   * @param tokenAddress - Address of the launched token
+   * @param options - Transaction options
+   */
+  async claimRefund(tokenAddress: string, options?: TxOptions): Promise<TxResult> {
+    this.requireSigner();
+    this.validateAddress(tokenAddress);
+
+    const tx = await this.contract.claimRefund(
+      tokenAddress,
+      this.buildTxOptions(options, GAS_LIMITS.CLAIM_REFUND)
+    );
+
+    return {
+      hash: tx.hash,
+      wait: () => tx.wait(),
+    };
+  }
+
+  /**
+   * ✅ NEW: Burn tokens from failed PROJECT_RAISE
+   *
+   * Burns all tokens if a PROJECT_RAISE fails to meet its target.
+   * Can be called by anyone after the deadline passes.
+   *
+   * Note: This is a cleanup function that can be called by anyone
+   *
+   * @param tokenAddress - Address of the launched token
+   * @param options - Transaction options
+   */
+  async burnFailedRaiseTokens(tokenAddress: string, options?: TxOptions): Promise<TxResult> {
+    this.requireSigner();
+    this.validateAddress(tokenAddress);
+
+    const tx = await this.contract.burnFailedRaiseTokens(
+      tokenAddress,
+      this.buildTxOptions(options, GAS_LIMITS.BURN_FAILED_RAISE_TOKENS)
+    );
+
+    return {
+      hash: tx.hash,
+      wait: () => tx.wait(),
+    };
+  }
+
+  /**
+   * ✅ NEW: Update fallback BNB price (admin only)
+   *
+   * Updates the fallback price used when the oracle fails.
+   * Only callable by contract owner.
+   *
+   * @param price - New fallback price (in 8 decimals format, e.g., "120000000000" for $1200)
+   * @param options - Transaction options
+   */
+  async updateFallbackPrice(price: string, options?: TxOptions): Promise<TxResult> {
+    this.requireSigner();
+
+    const tx = await this.contract.updateFallbackPrice(
+      price,
+      this.buildTxOptions(options, GAS_LIMITS.UPDATE_FALLBACK_PRICE)
+    );
+
+    return {
+      hash: tx.hash,
+      wait: () => tx.wait(),
+    };
+  }
+
+  /**
+   * ✅ NEW: Update LP fee harvester address (admin only)
+   *
+   * Updates the LP fee harvester contract address.
+   * Only callable by contract owner.
+   *
+   * @param lpFeeHarvesterAddress - New LP fee harvester contract address
+   * @param options - Transaction options
+   */
+  async updateLPFeeHarvester(
+    lpFeeHarvesterAddress: string,
+    options?: TxOptions
+  ): Promise<TxResult> {
+    this.requireSigner();
+    this.validateAddress(lpFeeHarvesterAddress);
+
+    const tx = await this.contract.updateLPFeeHarvester(
+      lpFeeHarvesterAddress,
+      this.buildTxOptions(options, GAS_LIMITS.UPDATE_LP_FEE_HARVESTER)
+    );
+
+    return {
+      hash: tx.hash,
+      wait: () => tx.wait(),
+    };
+  }
+
+  /**
+   * ✅ NEW: Emergency withdraw tokens (admin only)
+   *
+   * Emergency function to withdraw tokens from failed PROJECT_RAISE.
+   * Only callable by contract owner after deadline if raise failed.
+   *
+   * @param tokenAddress - Address of the token to withdraw
+   * @param options - Transaction options
+   */
+  async emergencyWithdraw(tokenAddress: string, options?: TxOptions): Promise<TxResult> {
+    this.requireSigner();
+    this.validateAddress(tokenAddress);
+
+    const tx = await this.contract.emergencyWithdraw(
+      tokenAddress,
+      this.buildTxOptions(options, GAS_LIMITS.EMERGENCY_WITHDRAW)
+    );
+
+    return {
+      hash: tx.hash,
+      wait: () => tx.wait(),
+    };
+  }
+
+  /**
+   * ✅ NEW: Check if contributor can claim tokens
+   *
+   * Helper method to check if a contributor is eligible to claim their tokens
+   */
+  async canClaimContributorTokens(
+    tokenAddress: string,
+    contributorAddress: string
+  ): Promise<boolean> {
+    try {
+      const info = await this.getLaunchInfo(tokenAddress);
+      const contribution = await this.getContribution(tokenAddress, contributorAddress);
+
+      return (
+        info.launchType === 1 && // PROJECT_RAISE
+        info.raiseCompleted &&
+        info.totalRaised >= info.raiseTarget &&
+        contribution.amount > 0n &&
+        !contribution.claimed
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * ✅ NEW: Check if contributor can claim refund
+   *
+   * Helper method to check if a contributor is eligible to claim a refund
+   */
+  async canClaimRefund(tokenAddress: string, contributorAddress: string): Promise<boolean> {
+    try {
+      const info = await this.getLaunchInfo(tokenAddress);
+      const contribution = await this.getContribution(tokenAddress, contributorAddress);
+      const currentTime = Math.floor(Date.now() / 1000);
+
+      return (
+        info.launchType === 1 && // PROJECT_RAISE
+        currentTime > Number(info.raiseDeadline) &&
+        info.totalRaised < info.raiseTarget &&
+        !info.raiseCompleted &&
+        contribution.amount > 0n &&
+        !contribution.claimed
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * ✅ NEW: Get contributor's token allocation
+   *
+   * Calculate how many tokens a contributor would receive after successful raise
+   */
+  async getContributorTokenAllocation(
+    tokenAddress: string,
+    contributorAddress: string
+  ): Promise<bigint> {
+    const info = await this.getLaunchInfo(tokenAddress);
+    const contribution = await this.getContribution(tokenAddress, contributorAddress);
+
+    if (contribution.amount === 0n || info.totalRaised === 0n) {
+      return 0n;
+    }
+
+    // Get total supply from token contract or use 1 billion default
+    const totalSupply = 1_000_000_000n * 10n ** 18n;
+    const contributorPool = (totalSupply * 70n) / 100n; // 70% for contributors
+
+    return (contribution.amount * contributorPool) / info.totalRaised;
+  }
+
+  /**
+   * ✅ NEW: Listen to ContributorTokensClaimed events
+   */
+  onContributorTokensClaimed(
+    callback: (event: any) => void,
+    filter?: EventFilterOptions
+  ): () => void {
+    return this.addEventListener('ContributorTokensClaimed', callback, filter);
+  }
+
+  /**
+   * ✅ NEW: Listen to RefundClaimed events
+   */
+  onRefundClaimed(callback: (event: any) => void, filter?: EventFilterOptions): () => void {
+    return this.addEventListener('RefundClaimed', callback, filter);
+  }
+
+  /**
+   * ✅ NEW: Listen to RaiseFailed events
+   */
+  onRaiseFailed(callback: (event: any) => void, filter?: EventFilterOptions): () => void {
+    return this.addEventListener('RaiseFailed', callback, filter);
+  }
+
+  /**
+   * ✅ NEW: Listen to PlatformFeePaid events
+   */
+  onPlatformFeePaid(callback: (event: any) => void, filter?: EventFilterOptions): () => void {
+    return this.addEventListener('PlatformFeePaid', callback, filter);
+  }
+
+  /**
    * Validate launch parameters
+   * ✅ UPDATED: Now validates BNB amounts instead of USD, removed projectInfoFiWallet validation
    */
   private validateLaunchParams(params: CreateLaunchParams): void {
-    const minRaiseUSD = parseFloat(CONSTANTS.MIN_RAISE_USD);
-    const maxRaiseUSD = parseFloat(CONSTANTS.MAX_RAISE_USD);
+    const minRaiseBNB = 0.1; // Minimum raise target
+    const maxRaiseBNB = 0.5; // Maximum raise target
     const minVesting = CONSTANTS.MIN_VESTING_DURATION / (24 * 60 * 60);
     const maxVesting = CONSTANTS.MAX_VESTING_DURATION / (24 * 60 * 60);
 
-    const raiseTarget = parseFloat(params.raiseTargetUSD);
-    const raiseMax = parseFloat(params.raiseMaxUSD);
+    const raiseTarget = parseFloat(params.raiseTargetBNB);
+    const raiseMax = parseFloat(params.raiseMaxBNB);
 
-    if (raiseTarget < minRaiseUSD || raiseTarget > maxRaiseUSD) {
-      throw new Error(`Raise target must be between $${minRaiseUSD} and $${maxRaiseUSD}`);
+    if (raiseTarget < minRaiseBNB || raiseTarget > maxRaiseBNB) {
+      throw new Error(`Raise target must be between ${minRaiseBNB} and ${maxRaiseBNB} BNB`);
     }
 
-    if (raiseMax < raiseTarget || raiseMax > maxRaiseUSD) {
-      throw new Error(`Raise max must be between raise target and $${maxRaiseUSD}`);
+    if (raiseMax < raiseTarget || raiseMax > maxRaiseBNB) {
+      throw new Error(`Raise max must be between raise target and ${maxRaiseBNB} BNB`);
     }
 
     if (params.vestingDuration < minVesting || params.vestingDuration > maxVesting) {
       throw new Error(`Vesting duration must be between ${minVesting} and ${maxVesting} days`);
-    }
-
-    if (!ethers.isAddress(params.projectInfoFiWallet)) {
-      throw new Error('Invalid project InfoFi wallet address');
     }
   }
 }

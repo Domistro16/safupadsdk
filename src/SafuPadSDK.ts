@@ -68,7 +68,7 @@ export class SafuPadSDK {
     } else {
       this.networkConfig = this.config.network!;
     }
-
+ 
     // Setup provider
     if (this.config.provider) {
       if (typeof this.config.provider === 'string') {
@@ -150,8 +150,9 @@ export class SafuPadSDK {
       this.priceOracle.updateSigner(this.signer);
       this.lpHarvester.updateSigner(this.signer);
     }
-
     this.initialized = true;
+
+    
   }
 
   /**
